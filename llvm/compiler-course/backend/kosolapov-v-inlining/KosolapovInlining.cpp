@@ -1,12 +1,11 @@
 ﻿#include "X86.h"
-#include "X86InstrInfo.h"
-#include "X86Subtarget.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/IR/Module.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
-#include <map>
+#include <unordered_map>
 
 using namespace llvm;
 
@@ -27,15 +26,15 @@ public:
   }
 
 private:
-  static const unsigned MaxInstrCount = 15;
-  static const unsigned MaxDepth = 3;
+  static constexpr unsigned MaxInstrCount = 15;
+  static constexpr unsigned MaxDepth = 3;
 
-  DenseMap<const Function *, unsigned> RecDepth;
+  std::unordered_map<const Function *, unsigned> Depth;
 
-  bool tryInline(MachineInstr &CallMI, MachineFunction &CallerMF);
-  bool canInline(const MachineFunction &CalleeMF) const;
-  void performInlining(MachineInstr &CallMI, MachineFunction &CalleeMF,
-                       MachineFunction &CallerMF);
+  bool tryInline(MachineInstr &MI, MachineFunction &CallerMF);
+  bool canInline(const MachineFunction &MF);
+  void doInline(MachineInstr &CallMI, MachineFunction &CalleeMF,
+                MachineFunction &CallerMF);
 };
 
 } // namespace
@@ -43,119 +42,106 @@ private:
 char KosolapovInlining::ID = 0;
 
 bool KosolapovInlining::runOnMachineFunction(MachineFunction &MF) {
-  bool Changed = false;
-  bool LocalChanged;
+  bool Changed;
+
   do {
-    LocalChanged = false;
-    for (MachineBasicBlock &MBB : MF) {
-      for (MachineInstr &MI : make_early_inc_range(MBB)) {
-        unsigned Opc = MI.getOpcode();
-        if (Opc == X86::CALL64pcrel32 || Opc == X86::CALL64r ||
-            Opc == X86::CALL64m) {
+    Changed = false;
+
+    for (auto &BB : MF) {
+      for (auto It = BB.begin(); It != BB.end();) {
+        MachineInstr &MI = *It++;
+
+        if (MI.isCall()) {
           if (tryInline(MI, MF)) {
-            LocalChanged = true;
+            Changed = true;
             break;
           }
         }
       }
-      if (LocalChanged)
+      if (Changed)
         break;
     }
-    Changed |= LocalChanged;
-  } while (LocalChanged);
-  return Changed;
+  } while (Changed);
+
+  return true;
 }
 
-bool KosolapovInlining::tryInline(MachineInstr &CallMI,
-                                  MachineFunction &CallerMF) {
-  const MachineOperand &TargetOp = CallMI.getOperand(0);
-  if (!TargetOp.isGlobal())
-    return false;
-  const GlobalValue *GV = TargetOp.getGlobal();
-  if (!GV)
-    return false;
-  const Function *CalleeFunc = dyn_cast<Function>(GV);
-  if (!CalleeFunc)
+bool KosolapovInlining::tryInline(MachineInstr &MI, MachineFunction &CallerMF) {
+  const MachineOperand &Op = MI.getOperand(0);
+  if (!Op.isGlobal())
     return false;
 
-  if (RecDepth[CalleeFunc] >= MaxDepth)
+  const Function *F = dyn_cast<Function>(Op.getGlobal());
+  if (!F || F == &CallerMF.getFunction())
+    return false;
+
+  if (Depth[F] >= MaxDepth)
     return false;
 
   MachineModuleInfo &MMI = getAnalysis<MachineModuleInfoWrapperPass>().getMMI();
-  MachineFunction *CalleeMF = MMI.getMachineFunction(*CalleeFunc);
-  if (!CalleeMF)
-    return false;
-
-  if (CalleeMF->size() != 1)
+  MachineFunction *CalleeMF = MMI.getMachineFunction(*F);
+  if (!CalleeMF || CalleeMF->empty())
     return false;
 
   if (!canInline(*CalleeMF))
     return false;
 
-  ++RecDepth[CalleeFunc];
-  performInlining(CallMI, *CalleeMF, CallerMF);
-  --RecDepth[CalleeFunc];
+  Depth[F]++;
+  doInline(MI, *CalleeMF, CallerMF);
+  Depth[F]--;
+  return true;
+}
+
+bool KosolapovInlining::canInline(const MachineFunction &MF) {
+  if (MF.size() > 1)
+    return false;
+  unsigned Cnt = 0;
+
+  for (auto &BB : MF)
+    for (auto &MI : BB)
+      if (!MI.isDebugInstr() && !MI.isReturn())
+        if (++Cnt > MaxInstrCount)
+          return false;
 
   return true;
 }
 
-bool KosolapovInlining::canInline(const MachineFunction &CalleeMF) const {
-  unsigned InstrCount = 0;
-  for (const MachineBasicBlock &MBB : CalleeMF) {
-    for (const MachineInstr &MI : MBB) {
-      if (!MI.isDebugInstr())
-        ++InstrCount;
-      if (InstrCount > MaxInstrCount)
-        return false;
-    }
-  }
-  return InstrCount <= MaxInstrCount;
-}
-
-void KosolapovInlining::performInlining(MachineInstr &CallMI,
-                                        MachineFunction &CalleeMF,
-                                        MachineFunction &CallerMF) {
-  assert(CalleeMF.size() == 1 && "Only single-block callees are supported");
-
-  MachineBasicBlock *CallMBB = CallMI.getParent();
-  MachineBasicBlock::iterator InsertPos = CallMI.getIterator();
-  MachineBasicBlock &CalleeEntry = *CalleeMF.begin();
+void KosolapovInlining::doInline(MachineInstr &CallMI,
+                                 MachineFunction &CalleeMF,
+                                 MachineFunction &CallerMF) {
+  MachineBasicBlock *CallBB = CallMI.getParent();
+  auto InsertPt = CallMI.getIterator();
 
   MachineRegisterInfo &CallerMRI = CallerMF.getRegInfo();
-  const MachineRegisterInfo &CalleeMRI = CalleeMF.getRegInfo();
+  MachineRegisterInfo &CalleeMRI = CalleeMF.getRegInfo();
+
   DenseMap<Register, Register> VRegMap;
 
-  SmallVector<MachineInstr *, 16> ToClone;
-  for (MachineInstr &MI : CalleeEntry) {
-    if (MI.isReturn())
-      continue;
-    ToClone.push_back(&MI);
-  }
-
-  for (MachineInstr *SrcMI : ToClone) {
-    MachineInstr *NewMI = CallerMF.CloneMachineInstr(SrcMI);
-
-    for (MachineOperand &MO : NewMI->operands()) {
-      if (!MO.isReg())
-        continue;
-      Register R = MO.getReg();
-      if (!R.isVirtual())
+  for (auto &BB : CalleeMF) {
+    for (auto &MI : BB) {
+      if (MI.isReturn())
         continue;
 
-      auto It = VRegMap.find(R);
-      if (It == VRegMap.end()) {
-        const TargetRegisterClass *RC = CalleeMRI.getRegClass(R);
-        Register NewR = CallerMRI.createVirtualRegister(RC);
-        It = VRegMap.insert({R, NewR}).first;
+      MachineInstr *NewMI = CallerMF.CloneMachineInstr(&MI);
+
+      for (auto &Op : NewMI->operands()) {
+        if (!Op.isReg() || !Op.getReg().isVirtual())
+          continue;
+        Register OldReg = Op.getReg();
+        if (!VRegMap.count(OldReg)) {
+          const TargetRegisterClass *RC = CalleeMRI.getRegClass(OldReg);
+          Register NewReg = CallerMRI.createVirtualRegister(RC);
+          VRegMap[OldReg] = NewReg;
+        }
+        Op.setReg(VRegMap[OldReg]);
       }
-      MO.setReg(It->second);
-    }
 
-    CallMBB->insert(InsertPos, NewMI);
+      CallBB->insert(InsertPt, NewMI);
+    }
   }
 
   CallMI.eraseFromParent();
 }
 
 static RegisterPass<KosolapovInlining>
-    X("kosolapov-inlining", "Kosolapov Inlining Pass (fixed)", false, false);
+    X("kosolapov-inlining", "Kosolapov Inlining Pass", false, false);
