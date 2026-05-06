@@ -1,0 +1,350 @@
+# RUN: llc -mtriple=x86_64-unknown-linux-gnu \
+# RUN:   --load=%llvmshlibdir/kosolapov-v-inlining_BACKEND%shlibext \
+# RUN:   -run-pass=kosolapov-inlining %s -o - | FileCheck %s
+
+--- |
+  target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
+  target triple = "x86_64-unknown-linux-gnu"
+
+  define i32 @test_basic_inline(i32 %x) { ret i32 0 }
+  define i1 @isEven(i32 %x) { ret i1 0 }
+
+  define i32 @test_too_many_instrs(i32 %x) { ret i32 0 }
+  define i32 @many_instrs(i32 %x) { ret i32 0 }
+
+  define i32 @test_reg_rename(i32 %x) { ret i32 0 }
+  define i32 @callee(i32 %x) { ret i32 0 }
+
+  define i32 @test_multi_block(i32 %x) { ret i32 0 }
+  define i32 @multi_block(i32 %x) { ret i32 0 }
+
+  define i32 @test_exact_15(i32 %x) { ret i32 0 }
+  define i32 @exact_15(i32 %x) { ret i32 0 }
+
+  define i32 @test_chain(i32 %x) { ret i32 0 }
+  define i32 @middle(i32 %x) { ret i32 0 }
+  define i32 @leaf(i32 %x) { ret i32 0 }
+
+  
+  define i32 @test_foo_chain(i32 %v) { ret i32 0 }
+  define i32 @foo3(i32 %v) { ret i32 0 }
+  define i32 @foo2(i32 %v) { ret i32 0 }
+  define i32 @foo1(i32 %v) { ret i32 0 }
+
+  define void @test_recursive_simple(i32 %x) { ret void }
+
+...
+
+# =========================================================
+# test_basic_inline
+# =========================================================
+
+# CHECK-LABEL: name: test_basic_inline
+# CHECK: TEST32ri $edi, 1
+# CHECK: SETCCr 4
+# CHECK-NOT: CALL64pcrel32 @isEven
+# CHECK: RET64
+
+---
+name: test_basic_inline
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    CALL64pcrel32 @isEven, csr_64, implicit $rdi, implicit-def $rax
+    RET64 $rax
+...
+
+---
+name: isEven
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    TEST32ri $edi, 1, implicit-def $eflags
+    $al = SETCCr 4, implicit $eflags
+    RET64 $rax
+...
+
+# =========================================================
+# test_too_many_instrs
+# =========================================================
+
+# CHECK-LABEL: name: test_too_many_instrs
+# CHECK: CALL64pcrel32 @many_instrs
+# CHECK-NOT: ADD32ri8
+# CHECK: RET64
+
+---
+name: test_too_many_instrs
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    CALL64pcrel32 @many_instrs, csr_64, implicit $rdi, implicit-def $rax
+    RET64 $rax
+...
+
+---
+name: many_instrs
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    %0:gr32 = COPY $edi
+    %1:gr32 = ADD32ri8 %0, 1, implicit-def $eflags
+    %2:gr32 = ADD32ri8 %1, 1, implicit-def $eflags
+    %3:gr32 = ADD32ri8 %2, 1, implicit-def $eflags
+    %4:gr32 = ADD32ri8 %3, 1, implicit-def $eflags
+    %5:gr32 = ADD32ri8 %4, 1, implicit-def $eflags
+    %6:gr32 = ADD32ri8 %5, 1, implicit-def $eflags
+    %7:gr32 = ADD32ri8 %6, 1, implicit-def $eflags
+    %8:gr32 = ADD32ri8 %7, 1, implicit-def $eflags
+    %9:gr32 = ADD32ri8 %8, 1, implicit-def $eflags
+    %10:gr32 = ADD32ri8 %9, 1, implicit-def $eflags
+    %11:gr32 = ADD32ri8 %10, 1, implicit-def $eflags
+    %12:gr32 = ADD32ri8 %11, 1, implicit-def $eflags
+    %13:gr32 = ADD32ri8 %12, 1, implicit-def $eflags
+    %14:gr32 = ADD32ri8 %13, 1, implicit-def $eflags
+    %15:gr32 = ADD32ri8 %14, 1, implicit-def $eflags
+    %16:gr32 = ADD32ri8 %15, 1, implicit-def $eflags
+    $eax = COPY %16
+    RET64 $rax
+...
+
+# =========================================================
+# test_reg_rename
+# =========================================================
+
+# CHECK-LABEL: name: test_reg_rename
+# CHECK: ADD32ri8 %0, 5
+# CHECK: ADD32ri8 %{{[0-9]+}}, 2
+# CHECK-NOT: CALL64pcrel32 @callee
+# CHECK: RET64
+
+---
+name: test_reg_rename
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    %0:gr32 = COPY $edi
+    %1:gr32 = ADD32ri8 %0, 5, implicit-def $eflags
+    $edi = COPY %1
+    CALL64pcrel32 @callee, csr_64, implicit $rdi, implicit-def $rax
+    %2:gr32 = COPY $eax
+    %3:gr32 = ADD32ri8 %2, 1, implicit-def $eflags
+    $eax = COPY %3
+    RET64 $rax
+...
+
+---
+name: callee
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    %0:gr32 = COPY $edi
+    %1:gr32 = ADD32ri8 %0, 2, implicit-def $eflags
+    $eax = COPY %1
+    RET64 $rax
+...
+
+# =========================================================
+# test_multi_block
+# =========================================================
+
+# CHECK-LABEL: name: test_multi_block
+# CHECK:      CALL64pcrel32 @multi_block
+# CHECK-NOT: CMP32ri8
+# CHECK-NOT: JCC_1
+# CHECK: RET64
+
+---
+name: test_multi_block
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    CALL64pcrel32 @multi_block, csr_64, implicit $rdi, implicit-def $rax
+    RET64 $rax
+...
+
+---
+name: multi_block
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    %0:gr32 = COPY $edi
+    CMP32ri8 %0, 0, implicit-def $eflags
+    JCC_1 %bb.2, 15, implicit $eflags
+    JMP_1 %bb.1
+
+  bb.1:
+    $eax = MOV32r0 implicit-def $eflags
+    RET64 $rax
+
+  bb.2:
+    $eax = MOV32ri 1
+    RET64 $rax
+...
+
+# =========================================================
+# test_exact_15
+# =========================================================
+
+# CHECK-LABEL: name: test_exact_15
+# CHECK: ADD32ri8
+# CHECK-NOT:  CALL64pcrel32 @exact_15
+# CHECK: RET64
+
+---
+name: test_exact_15
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    CALL64pcrel32 @exact_15, csr_64, implicit $rdi, implicit-def $rax
+    RET64 $rax
+...
+
+---
+name: exact_15
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    %0:gr32 = ADD32ri8 $edi, 1, implicit-def $eflags
+    %1:gr32 = ADD32ri8 %0, 1, implicit-def $eflags
+    %2:gr32 = ADD32ri8 %1, 1, implicit-def $eflags
+    %3:gr32 = ADD32ri8 %2, 1, implicit-def $eflags
+    %4:gr32 = ADD32ri8 %3, 1, implicit-def $eflags
+    %5:gr32 = ADD32ri8 %4, 1, implicit-def $eflags
+    %6:gr32 = ADD32ri8 %5, 1, implicit-def $eflags
+    %7:gr32 = ADD32ri8 %6, 1, implicit-def $eflags
+    %8:gr32 = ADD32ri8 %7, 1, implicit-def $eflags
+    %9:gr32 = ADD32ri8 %8, 1, implicit-def $eflags
+    %10:gr32 = ADD32ri8 %9, 1, implicit-def $eflags
+    %11:gr32 = ADD32ri8 %10, 1, implicit-def $eflags
+    %12:gr32 = ADD32ri8 %11, 1, implicit-def $eflags
+    $eax = COPY %12
+    RET64 $rax
+...
+
+# =========================================================
+# test_chain
+# =========================================================
+
+# CHECK-LABEL: name: test_chain
+# CHECK:      ADD32ri8
+# CHECK-NOT: CALL64pcrel32
+# CHECK: RET64
+
+---
+name: test_chain
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    CALL64pcrel32 @middle, csr_64, implicit $rdi, implicit-def $rax
+    RET64 $rax
+...
+
+---
+name: middle
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    CALL64pcrel32 @leaf, csr_64, implicit $rdi, implicit-def $rax
+    RET64 $rax
+...
+
+---
+name: leaf
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    %0:gr32 = ADD32ri8 $edi, 1, implicit-def $eflags
+    $eax = COPY %0
+    RET64 $rax
+...
+
+# =========================================================
+# test_foo_chain
+# =========================================================
+
+# CHECK-LABEL: name: test_foo_chain
+# CHECK: ADD32ri8
+# CHECK: IMUL32rr
+# CHECK: SUB32rr
+# CHECK: IMUL32rr
+# CHECK-NOT: CALL64pcrel32 @foo1
+# CHECK-NOT: CALL64pcrel32 @foo2
+# CHECK-NOT: CALL64pcrel32 @foo3
+# CHECK: RET64
+
+---
+name: test_foo_chain
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    CALL64pcrel32 @foo3, csr_64, implicit $rdi, implicit-def $rax
+    RET64 $rax
+...
+---
+name: foo3
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    CALL64pcrel32 @foo2, csr_64, implicit $rdi, implicit-def $rax
+    %0:gr32 = IMUL32rr $eax, $eax, implicit-def $eflags
+    $eax = COPY %0
+    RET64 $rax
+...
+---
+name: foo2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    %0:gr32 = ADD32ri8 $edi, 10, implicit-def $eflags
+    CALL64pcrel32 @foo1, csr_64, implicit $rdi, implicit-def $rax
+    %1:gr32 = SUB32rr %0, $eax, implicit-def $eflags
+    $eax = COPY %1
+    RET64 $rax
+...
+---
+name: foo1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    %0:gr32 = IMUL32rr $edi, $edi, implicit-def $eflags
+    $eax = COPY %0
+    RET64 $rax
+...
+
+
+# =========================================================
+# test_recursive_simple
+# =========================================================
+
+# CHECK-LABEL: name: test_recursive_simple
+# CHECK: CALL64pcrel32 @test_recursive_simple
+# CHECK: RET64
+
+---
+name: test_recursive_simple
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $rdi
+    CALL64pcrel32 @test_recursive_simple, csr_64, implicit $rdi
+    RET64
+...
+ 
