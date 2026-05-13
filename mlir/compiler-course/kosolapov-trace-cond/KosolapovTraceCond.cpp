@@ -6,7 +6,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Tools/Plugins/PassPlugin.h"
 
-    using namespace mlir;
+using namespace mlir;
 
 namespace {
 
@@ -77,7 +77,8 @@ private:
   void insertTraceCallAtEntry(Block &block, StringRef functionName) {
     OpBuilder builder(&block, block.begin());
 
-    builder.create<func::CallOp>(block.getLoc(), functionName, TypeRange{},
+    builder.create<func::CallOp>(block.getParentOp()->getLoc(), functionName,
+                                 TypeRange{},
                                  ValueRange{});
   }
 
