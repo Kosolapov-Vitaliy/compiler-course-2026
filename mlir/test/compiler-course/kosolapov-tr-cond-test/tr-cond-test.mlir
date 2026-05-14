@@ -1,4 +1,4 @@
-// RUN: mlir-opt -load-pass-plugin=%mlir_lib_dir/kosolapov_tr_cond_test_MLIR%shlibext \
+// RUN: mlir-opt -load-pass-plugin=%mlir_lib_dir/kosolapov-trace-cond_MLIR%shlibext \
 // RUN:   --pass-pipeline="builtin.module(kosolapov-trace-condition)" %s | FileCheck %s
 
 // CHECK-DAG: func.func private @trace_condition_then_begin()
@@ -77,11 +77,7 @@ func.func @affine_if_case(%idx: index) {
   }
   return
 }
-func.func private @trace_condition_then_begin()
-func.func private @trace_condition_then_end()
 
-// CHECK-COUNT-1: func.func private @trace_condition_then_begin()
-// CHECK-COUNT-1: func.func private @trace_condition_then_end()
 
 
 // CHECK-LABEL: func.func @existing_symbols

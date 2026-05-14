@@ -47,21 +47,24 @@ private:
 
   void initializeTraceFunctions(ModuleOp module) {
     MLIRContext *context = module.getContext();
-    auto ensure = [&](StringRef name) {
+    
+    OpBuilder builder(module.getBodyRegion());
+    builder.setInsertionPointToStart(&module.getBodyRegion().front());
+
+    auto createIfMissing = [&](StringRef name) {
       if (module.lookupSymbol<func::FuncOp>(name))
         return;
-      OpBuilder builder(module.getBodyRegion());
-      builder.setInsertionPointToStart(module.getBody());
-      auto signature = FunctionType::get(context, {}, {});
-      auto function =
-          builder.create<func::FuncOp>(module.getLoc(), name, signature);
-      function.setPrivate();
+
+      auto type = builder.getFunctionType({}, {});
+      auto fn = builder.create<func::FuncOp>(module.getLoc(), name, type);
+
+      fn.setPrivate();
     };
 
-    ensure(thenTrace.enter);
-    ensure(thenTrace.leave);
-    ensure(elseTrace.enter);
-    ensure(elseTrace.leave);
+    createIfMissing(thenTrace.enter);
+    createIfMissing(thenTrace.leave);
+    createIfMissing(elseTrace.enter);
+    createIfMissing(elseTrace.leave);
   }
 
   void instrumentConditionalRegion(Region &region, const TracePair &trace) {
@@ -78,8 +81,7 @@ private:
     OpBuilder builder(&block, block.begin());
 
     builder.create<func::CallOp>(block.getParentOp()->getLoc(), functionName,
-                                 TypeRange{},
-                                 ValueRange{});
+                                 TypeRange{}, ValueRange{});
   }
 
   void insertTraceCallBeforeExit(Block &block, StringRef functionName) {
