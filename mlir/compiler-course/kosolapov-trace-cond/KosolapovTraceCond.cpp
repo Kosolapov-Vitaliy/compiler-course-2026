@@ -47,7 +47,6 @@ private:
 
   void initializeTraceFunctions(ModuleOp module) {
     MLIRContext *context = module.getContext();
-    
     OpBuilder builder(module.getBodyRegion());
     builder.setInsertionPointToStart(&module.getBodyRegion().front());
 
