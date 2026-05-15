@@ -11,14 +11,16 @@
 func.func @simple_if(%cond: i1) {
   // CHECK: scf.if
   scf.if %cond {
-    // CHECK: func.call @trace_condition_then_begin()
+    // CHECK-NEXT: func.call @trace_condition_then_begin()
+    // CHECK-NEXT: %[[C1:.+]] = arith.constant 1 : i32
+    // CHECK-NEXT: func.call @trace_condition_then_end()
     %c1 = arith.constant 1 : i32
-    // CHECK: func.call @trace_condition_then_end()
     scf.yield
   } else {
     // CHECK: func.call @trace_condition_else_begin()
+    // CHECK-NEXT: %[[C2:.+]] = arith.constant 2 : i32
+    // CHECK-NEXT: func.call @trace_condition_else_end()
     %c2 = arith.constant 2 : i32
-    // CHECK: func.call @trace_condition_else_end()
     scf.yield
   }
   return
@@ -27,10 +29,12 @@ func.func @simple_if(%cond: i1) {
 
 // CHECK-LABEL: func.func @if_without_else
 func.func @if_without_else(%flag: i1) {
+// CHECK: scf.if
   scf.if %flag {
-    // CHECK: func.call @trace_condition_then_begin()
+    // CHECK-NEXT: func.call @trace_condition_then_begin()
+    // CHECK-NEXT: %[[VAL:.+]] = arith.constant 7 : i32
+    // CHECK-NEXT: func.call @trace_condition_then_end()
     %v = arith.constant 7 : i32
-    // CHECK: func.call @trace_condition_then_end()
     scf.yield
   }
   return
@@ -43,21 +47,24 @@ func.func @nested_if(%a: i1, %b: i1) {
     // CHECK: func.call @trace_condition_then_begin()
     scf.if %b {
       // CHECK: func.call @trace_condition_then_begin()
+      // CHECK-NEXT: %[[X:.+]] = arith.constant 10 : i32
+      // CHECK-NEXT: func.call @trace_condition_then_end()
       %x = arith.constant 10 : i32
-      // CHECK: func.call @trace_condition_then_end()
       scf.yield
     } else {
       // CHECK: func.call @trace_condition_else_begin()
+      // CHECK-NEXT: %[[Y:.+]] = arith.constant 20 : i32
+      // CHECK-NEXT: func.call @trace_condition_else_end()
       %y = arith.constant 20 : i32
-      // CHECK: func.call @trace_condition_else_end()
       scf.yield
     }
     // CHECK: func.call @trace_condition_then_end()
     scf.yield
   } else {
     // CHECK: func.call @trace_condition_else_begin()
+    // CHECK-NEXT: %[[Z:.+]] = arith.constant 30 : i32
+    // CHECK-NEXT: func.call @trace_condition_else_end()
     %z = arith.constant 30 : i32
-    // CHECK: func.call @trace_condition_else_end()
     scf.yield
   }
   return
@@ -66,14 +73,17 @@ func.func @nested_if(%a: i1, %b: i1) {
 
 // CHECK-LABEL: func.func @affine_if_case
 func.func @affine_if_case(%idx: index) {
+// CHECK: affine.if
   affine.if #affine_test(%idx) {
-    // CHECK: func.call @trace_condition_then_begin()
+    // CHECK-NEXT: func.call @trace_condition_then_begin()
+    // CHECK-NEXT: %[[A:.+]] = arith.constant 1 : i32
+    // CHECK-NEXT: func.call @trace_condition_then_end()
     %a = arith.constant 1 : i32
-    // CHECK: func.call @trace_condition_then_end()
   } else {
     // CHECK: func.call @trace_condition_else_begin()
+    // CHECK-NEXT: %[[B:.+]] = arith.constant 0 : i32
+    // CHECK-NEXT: func.call @trace_condition_else_end()
     %b = arith.constant 0 : i32
-    // CHECK: func.call @trace_condition_else_end()
   }
   return
 }
@@ -82,10 +92,12 @@ func.func @affine_if_case(%idx: index) {
 
 // CHECK-LABEL: func.func @existing_symbols
 func.func @existing_symbols(%cond: i1) {
+// CHECK: scf.if
   scf.if %cond {
-    // CHECK: func.call @trace_condition_then_begin()
+    // CHECK-NEXT: func.call @trace_condition_then_begin()
+    // CHECK-NEXT: %[[T:.+]] = arith.constant 5 : i32
+    // CHECK-NEXT: func.call @trace_condition_then_end()
     %t = arith.constant 5 : i32
-    // CHECK: func.call @trace_condition_then_end()
     scf.yield
   }
   return
